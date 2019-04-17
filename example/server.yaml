@@ -1,22 +1,85 @@
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-server-config
+data:
+  redis.conf: |
+    bind 0.0.0.0
+    protected-mode yes
+    port 6379
+    tcp-backlog 511
+    timeout 0
+    tcp-keepalive 300
+    daemonize no
+    supervised no
+    pidfile /var/run/redis_6379.pid
+    loglevel notice
+    logfile ""
+    databases 16
+    save 900 1
+    save 300 10
+    save 60 10000
+    stop-writes-on-bgsave-error yes
+    rdbcompression yes
+    rdbchecksum yes
+    dbfilename dump.rdb
+    dir ./
+    slave-serve-stale-data yes
+    slave-read-only yes
+    repl-diskless-sync no
+    repl-diskless-sync-delay 5
+    repl-disable-tcp-nodelay no
+    appendonly no
+    appendfilename "appendonly.aof"
+    appendfsync everysec
+    no-appendfsync-on-rewrite no
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+    aof-load-truncated yes
+    lua-time-limit 5000
+    slowlog-log-slower-than 10000
+    slowlog-max-len 128
+    latency-monitor-threshold 0
+    notify-keyspace-events ""
+    hash-max-ziplist-entries 512
+    hash-max-ziplist-value 64
+    list-max-ziplist-size -2
+    list-compress-depth 0
+    set-max-intset-entries 512
+    zset-max-ziplist-entries 128
+    zset-max-ziplist-value 64
+    hll-sparse-max-bytes 3000
+    activerehashing yes
+    client-output-buffer-limit normal 0 0 0
+    client-output-buffer-limit slave 256mb 64mb 60
+    client-output-buffer-limit pubsub 32mb 8mb 60
+    hz 10
+    aof-rewrite-incremental-fsync yes
+---
 apiVersion: apps/v1beta1
 kind: StatefulSet
 metadata:
   name: redis-server
 spec:
   serviceName: redis-server
+  podManagementPolicy: OrderedReady
   replicas: 3
   template:
     metadata:
       labels:
         app: redis-server
-      annotations:
-        pod.beta.kubernetes.io/init-containers: '[{
-            "name": "k8s-redis-ha-server",
-            "image": "tarosky/k8s-redis-ha:server-3.0.1",
-            "volumeMounts": [{"name": "opt", "mountPath": "/opt"}]
-          }]'
     spec:
+      initContainers:
+      - name: k8s-redis-ha-server
+        image: registry.cn-hangzhou.aliyuncs.com/luashiping/k8s-redis-ha:server-3.0.1
+        imagePullPolicy: Always
+        volumeMounts: 
+          - name: opt
+            mountPath: /opt
+          - name: redis-server-config-volume
+            mountPath: /opt/redis.template.conf
+            subPath: redis.template.conf
       containers:
         - name: redis-server
           image: redis:3.2
@@ -33,19 +96,35 @@ spec:
               value: redis-sentinel
             - name: SENTINEL_PORT
               value: redis-sentinel
+            - name: AUTH
+              value: abcdefgh
           ports:
             - containerPort: 6379
               name: redis-server
           readinessProbe:
             exec:
-              command: ['redis-cli', 'info', 'server']
+              command: 
+              - redis-cli
+              - -a
+              - $AUTH
+              - ping
           volumeMounts:
             - name: redis-server-volume
               mountPath: /data
             - name: opt
               mountPath: /opt
+            - name: redis-server-config-volume
+              mountPath: /opt/redis.template.conf
+              subPath: redis.template.conf
       volumes:
         - name: redis-server-volume
           emptyDir: {}
         - name: opt
           emptyDir: {}
+          volumes:
+        - name: redis-server-config-volume
+          configMap:
+            name: redis-server-config
+            items:
+            - key: redis.conf
+              path: redis.template.conf

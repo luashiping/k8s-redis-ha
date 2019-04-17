@@ -1,3 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-sentinel-config
+  namespace: default
+data:
+  sentinel.conf: |
+    sentinel monitor mymaster %MASTER% 6379 2
+    sentinel down-after-milliseconds mymaster 5000
+    sentinel failover-timeout mymaster 60000
+    sentinel parallel-syncs mymaster 1
+    sentinel auth-pass mymaster %PASSWORD%
+    protected-mode no
+    port 26379
 ---
 apiVersion: apps/v1beta1
 kind: StatefulSet
@@ -10,13 +24,17 @@ spec:
     metadata:
       labels:
         app: redis-sentinel
-      annotations:
-        pod.beta.kubernetes.io/init-containers: '[{
-            "name": "k8s-redis-ha-sentinel",
-            "image": "tarosky/k8s-redis-ha:sentinel-3.0.1",
-            "volumeMounts": [{"name": "opt", "mountPath": "/opt"}]
-          }]'
     spec:
+      initContainers:
+      - name: k8s-redis-ha-sentinel
+        image: registry.cn-hangzhou.aliyuncs.com/luashiping/k8s-redis-ha:sentinel-3.0.1
+        imagePullPolicy: Always
+        volumeMounts: 
+          - name: opt
+            mountPath: /opt
+          - name: redis-sentinel-config-volume
+            mountPath: /opt/sentinel.template.conf
+            subPath: sentinel.template.conf
       containers:
         - name: redis-sentinel
           image: redis:3.2
@@ -29,6 +47,8 @@ spec:
               value: redis-server
             - name: SERVICE_PORT
               value: redis-server
+            - name: AUTH
+              value: abcdefgh
           ports:
             - containerPort: 26379
               name: redis-sentinel
@@ -38,8 +58,12 @@ spec:
           volumeMounts:
             - name: opt
               mountPath: /opt
+            - name: redis-sentinel-config-volume
+              mountPath: /opt/sentinel.template.conf
+              subPath: sentinel.template.conf
         - name: redis-sword
-          image: tarosky/k8s-redis-ha:sword-3.0.1
+          image: registry.cn-hangzhou.aliyuncs.com/luashiping/k8s-redis-ha:sword-3.0.1
+          imagePullPolicy: Always
           env:
             - name: SERVICE
               value: redis-server
@@ -49,9 +73,17 @@ spec:
               value: redis-sentinel
             - name: SENTINEL_PORT
               value: redis-sentinel
+            - name: AUTH
+              value: abcdefgh
           volumeMounts:
             - name: opt
               mountPath: /opt
       volumes:
         - name: opt
           emptyDir: {}
+        - name: redis-sentinel-config-volume
+          configMap:
+            name: redis-sentinel-config
+            items:
+            - key: sentinel.conf
+              path: sentinel.template.conf

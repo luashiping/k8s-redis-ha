@@ -6,10 +6,11 @@ namespace="$(< /var/run/secrets/kubernetes.io/serviceaccount/namespace)"
 readonly namespace
 readonly service_domain="_$SERVICE_PORT._tcp.$SERVICE.$namespace.svc.cluster.local"
 readonly service_sentinel_domain="_$SENTINEL_PORT._tcp.$SENTINEL.$namespace.svc.cluster.local"
+readonly auth="$AUTH"
 
 redis_info () {
   set +e
-  timeout 10 redis-cli -h "$1" -a "$service_domain" info replication
+  timeout 10 redis-cli -h "$1" -a "$auth" info replication
   set -e
 }
 
